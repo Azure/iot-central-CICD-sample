@@ -408,7 +408,7 @@ Function Get-Roles {
 }
 
 #Get list of all API Tokens in the app
-Function Get-Tokens{
+Function Get-Tokens {
     $Uri = $BaseUrl + "apiTokens?api-version=1.0"
     $Body = @{}
     $Parameters = @{
@@ -424,7 +424,7 @@ Function Get-Tokens{
 }
 
 #Create a new API token for the specified role
-Function Add-Token{
+Function Add-Token {
     Param(
         [Parameter(Mandatory = $true, Position = 0)] [String]$TokenId,
         [Parameter(Mandatory = $true, Position = 1)] [String]$Config
@@ -443,7 +443,7 @@ Function Add-Token{
 }
 
 #Get a list of all data export destinations in the app
-Function Get-CDEDestinations{
+Function Get-CDEDestinations {
     $Uri = $BaseUrl + "dataExport/destinations?api-version=1.1-preview"
     $Body = @{}
     $Parameters = @{
@@ -459,11 +459,11 @@ Function Get-CDEDestinations{
 }
 
 #Create a new data export destination
-Function Add-Destination{
+Function Add-Destination {
     Param(
         [Parameter(Mandatory = $true, Position = 0)] [String]$Config
     )
-    $Uri = $BaseUrl + "dataExport/destinations/destination1?api-version=1.1-preview"
+    $Uri = $BaseUrl + "dataExport/destinations/" + ($Config | ConvertFrom-Json).id + "?api-version=1.1-preview"
     $Parameters = @{
         Method      = "PUT"
         Uri         = $Uri

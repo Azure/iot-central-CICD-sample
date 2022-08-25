@@ -107,11 +107,11 @@ else {
 
 #Compare Data Export Destinations to Config
 $ConfigDestinationsObj = $ConfigObj."destinations"
-if($ConfigDestinationsObj.length -eq 0){
+if ($ConfigDestinationsObj.length -eq 0) {
     Write-Host "     Data Export Destinations not in config file." -ForegroundColor DarkGray -NoNewLine
     Write-Host " Skipping" -ForegroundColor green
 }
-else{
+else {
     $CloudDestinationsObj = Get-CDEDestinations -ErrorAction stop
     $CloudDestinationsObj = $CloudDestinationsObj | ConvertFrom-Json
 
@@ -126,61 +126,63 @@ else{
     $ConfigDestinations = $ConfigDestinationsObj | ConvertTo-Json -Depth 100 -Compress
 
     $ContentEqual = ($CloudDestinations -eq $ConfigDestinations)
-    if($ContentEqual){
+    if ($ContentEqual) {
         Write-Host "     Data export destinations match config " -ForegroundColor DarkGray -NoNewLine
         Write-Host @greenCheck
     }
-    else{
+    else {
         #Iterate through destinations in config file to find the missing exports
-        $ConfigDestinationsObj | ForEach-Object {
+        $ConfigDestinationsObj.value | ForEach-Object {
             $Id = $_.id
-            $Name = $_.name
-            $ConfigObj = $_.value[0]
-            $ConfigObj.PSObject.Properties.Remove("status")
+            $Name = $_.displayName
+            $ConfigItem = $_
+            $ConfigItem.PSObject.Properties.Remove("status")
             $SecretName = "Undefined"
 
-            switch($ConfigObj.type){
-                    "webhook@v1" {
-                        if($ConfigObj.headerCustomizations."x-custom-region".secret -ne $false){
-                            $SecretName = $ConfigObj.headerCustomizations."x-custom-region".secret
-                            $Secret = az keyvault secret show --vault-name $KeyVault --name $SecretName
-                            $ConfigObj.headerCustomizations."x-custom-region".secret = $Secret
-                        }
-                        Break
+            switch ($ConfigItem.type) {
+                "webhook@v1" {
+                    if ($ConfigItem.headerCustomizations."x-custom-region".secret -ne $false) {
+                        $SecretName = $ConfigItem.headerCustomizations."x-custom-region".secret
+                        $Secret = az keyvault secret show --vault-name $KeyVault --name $SecretName
+                        $ConfigItem.headerCustomizations."x-custom-region".secret = $Secret
                     }
-                    "dataexplorer@v1" {
-                        $SecretName = $ConfigObj.authorization.clientSecret
-                        $Result = az keyvault secret show --vault-name $KeyVault --name $SecretName
-                        $ResultObj = $Result | ConvertFrom-Json
-                        $Secret = $ResultObj.value
-                        $ConfigObj.authorization.clientSecret = $Secret
-                        Break
-                    }
-                    Default {
-                        $SecretName = $ConfigObj.authorization.connectionString
+                    Break
+                }
+                "dataexplorer@v1" {
+                    $SecretName = $ConfigItem.authorization.clientSecret
+                    $Result = az keyvault secret show --vault-name $KeyVault --name $SecretName
+                    $ResultObj = $Result | ConvertFrom-Json
+                    $Secret = $ResultObj.value
+                    $ConfigItem.authorization.clientSecret = $Secret
+                    Break
+                }
+                Default {
+                    if ($ConfigItem.authorization.type -eq "connectionString") {
+                        $SecretName = $ConfigItem.authorization.connectionString
                         $Secret = az keyvault secret show --vault-name $KeyVault --name $SecretName
                         $Result = az keyvault secret show --vault-name $KeyVault --name $SecretName
                         $ResultObj = $Result | ConvertFrom-Json
                         $Secret = $ResultObj.value
-                        $ConfigObj.authorization.connectionString = $Secret
+                        $ConfigItem.authorization.connectionString = $Secret
                     }
                 }
+            }
 
-            $Config = $ConfigObj | ConvertTo-Json -Depth 100 -Compress
+            $Config = $ConfigItem | ConvertTo-Json -Depth 100 -Compress
 
-            if(($CloudDestinations.Length -eq 0) -or ($CloudDestinations -inotmatch $id)) #We need to add this data export
-            {
+            if (($CloudDestinations.Length -eq 0) -or ($CloudDestinations -inotmatch $id)) {
+                #We need to add this data export
                 Write-Host "     Adding missing data export destination $name " -ForegroundColor DarkGray -NoNewline
                 $Result = Add-Destination -Config $Config
                 Write-Host @greenCheck
             }
-            elseif(($CloudDestinations.Length -gt 0) -and (!$CloudDestinations.Contains($Config))) #We need to update this data export
-            {
+            elseif (($CloudDestinations.Length -gt 0) -and (!$CloudDestinations.Contains($Config))) {
+                #We need to update this data export
                 Write-Host "     Updating existing data export destination $name " -ForegroundColor DarkGray -NoNewline
                 $Result = Add-Destination -Config $Config
                 Write-Host @greenCheck
             }
-            else{
+            else {
                 Write-Host "We didn't do anything with data export destinations"
                 Write-Host "Record: $Record"
                 Write-Host "ID: $Id"
@@ -292,54 +294,56 @@ else {
     Write-Host  "##vso[task.LogIssue type=warning;] Roles do not match the config file. Roles will need to be manually updated in the target app."
 }
 
-    #Compare File Uploads to Config
-    $CloudUploads = Get-FileUploads -ErrorAction stop
-    $CloudUploadsObj = $CloudUploads | ConvertFrom-Json
-    $UploadsConfig = $ConfigObj."file uploads"
+#Compare File Uploads to Config
+$CloudUploads = Get-FileUploads -ErrorAction stop
+$CloudUploadsObj = $CloudUploads | ConvertFrom-Json
+$UploadsConfig = $ConfigObj."file uploads"
 
-    if($UploadsConfig.length -eq 0){
-        Write-Host "     File uploads not in config file. Skipping."
+if ($UploadsConfig.length -eq 0) {
+    Write-Host "     File uploads not in config file. Skipping."
 	  
 																						   
 									   
 											  
 											 
+}
+else {
+    #Remove state and etag from the JSON so we can accurately compare the config to the app
+    $CloudUploadsObj | ForEach-Object {
+        $_.PSObject.Properties.Remove("state")
+        $_.PSObject.Properties.Remove("etag")
     }
-    else{
-        #Remove state and etag from the JSON so we can accurately compare the config to the app
-        $CloudUploadsObj | ForEach-Object {
-            $_.PSObject.Properties.Remove("state")
-            $_.PSObject.Properties.Remove("etag")
-        }
-        $ContentEqual = ($CloudUploadsObj | ConvertTo-Json -Compress -Depth 100) -eq ($UploadsConfig | ConvertTo-Json -Compress -Depth 100)
+    $ContentEqual = ($CloudUploadsObj | ConvertTo-Json -Compress -Depth 100) -eq ($UploadsConfig | ConvertTo-Json -Compress -Depth 100)
 
-        if($ContentEqual){
-            Write-Host "     File uploads match config "
+    if ($ContentEqual) {
+        Write-Host "     File uploads match config "
 	 
 		  
 									  
 														 
 																			 
 																	
-        }
-        else{
-            $Secret = az keyvault secret show --vault-name $KeyVault --name $UploadsConfig.connectionString #Get the secret name from the connection string value in the config
-            $ConnectionString = ($Secret | ConvertFrom-Json).value
-            $UploadsConfig.connectionString = $ConnectionString   
+    }
+    else {
+        $Secret = az keyvault secret show --vault-name $KeyVault --name $UploadsConfig.connectionString #Get the secret name from the connection string value in the config
+        $ConnectionString = ($Secret | ConvertFrom-Json).value
+        $UploadsConfig.connectionString = $ConnectionString   
 
-            if($CloudUploads -eq "404"){ #There is no file upload configured currently
-                Write-Host "     Adding file uploads config to IoT Central " -ForegroundColor DarkGray -NoNewLine
-                $UploadsConfig = $UploadsConfig | ConvertTo-Json -Compress -Depth 100
-                $UploadsConfig = Add-FileUploads -Config $UploadsConfig
-                Write-Host @greenCheck
-            }
-            else{ #We need to update the existing config
-                Write-Host "     Updating file uploads config in IoT Central "
-                $UploadsConfig = $UploadsConfig | ConvertTo-Json -Compress -Depth 100
-                $UploadsConfig = Add-FileUploads -Config $UploadsConfig
-            }
+        if ($CloudUploads -eq "404") {
+            #There is no file upload configured currently
+            Write-Host "     Adding file uploads config to IoT Central " -ForegroundColor DarkGray -NoNewLine
+            $UploadsConfig = $UploadsConfig | ConvertTo-Json -Compress -Depth 100
+            $UploadsConfig = Add-FileUploads -Config $UploadsConfig
+            Write-Host @greenCheck
+        }
+        else {
+            #We need to update the existing config
+            Write-Host "     Updating file uploads config in IoT Central "
+            $UploadsConfig = $UploadsConfig | ConvertTo-Json -Compress -Depth 100
+            $UploadsConfig = Add-FileUploads -Config $UploadsConfig
         }
     }
+}
  
 
 
@@ -348,25 +352,25 @@ $CloudTokens = Get-Tokens -ErrorAction stop
 $CloudTokensObj = $CloudTokens | ConvertFrom-Json
 $TokensConfig = $ConfigObj."APITokens"
 
-if($TokensConfig.length -eq 0){
+if ($TokensConfig.length -eq 0) {
     Write-Host "     API Tokens not in config file." -ForegroundColor DarkGray -NoNewLine
     Write-Host " Skipping" -ForegroundColor green
 }
-else{
+else {
     $ContentEqual = ($CloudTokensObj | ConvertTo-Json -Compress -Depth 100) -eq ($TokensConfig | ConvertTo-Json -Compress -Depth 100)
 
-    if($ContentEqual){
+    if ($ContentEqual) {
         Write-Host "     API tokens match config " -ForegroundColor DarkGray -NoNewLine
         Write-Host @greenCheck
     }
-    else{
+    else {
         #Iterate through API tokens in config file to find the missing tokens
         $TokensConfig."value" | ForEach-Object {
             $id = $_.id
             $_.PSObject.Properties.remove("expiry")
             
-            if($CloudTokens -inotmatch $id) #We need to add this API token
-            {
+            if ($CloudTokens -inotmatch $id) {
+                #We need to add this API token
                 Write-Host "     Adding missing API token $id " -ForegroundColor DarkGray -NoNewline
                 $Config = $_ | ConvertTo-Json -Depth 100 -Compress
                 $Result = Add-Token -TokenId $id -Config $Config
